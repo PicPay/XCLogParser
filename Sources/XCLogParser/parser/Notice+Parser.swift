@@ -30,6 +30,10 @@ extension Notice {
     /// - returns: An Array of `Notice`
     public static func parseFromLogSection(_ logSection: IDEActivityLogSection, forType type: DetailStepType)
         -> [Notice] {
+        var logSection = logSection
+        if shouldTruncateLTOIssues(logSection: logSection) {
+            logSection = self.logSectionWithTruncatedLTOIssues(logSection: logSection)
+        }
         // we look for clangWarnings parsing the text of the logSection
         let clangWarningsFlags = self.parseClangWarningFlags(text: logSection.text)
         let clangWarnings = self.parseClangWarnings(clangFlags: clangWarningsFlags, logSection: logSection)
@@ -186,5 +190,36 @@ extension Notice {
                 || text.contains("has been deprecated")
         }
         return false
+    }
+
+    /// When using LTO the GenerateDSYMFile may have thousands of warnings/notes
+    /// that can produce memory errors when transformed to JSON
+    /// This function detects those kind of cases
+    private static func shouldTruncateLTOIssues(logSection: IDEActivityLogSection) -> Bool {
+        return logSection.signature.hasPrefix("GenerateDSYMFile") && logSection.messages.count > 100
+    }
+
+    private static func logSectionWithTruncatedLTOIssues(logSection: IDEActivityLogSection) -> IDEActivityLogSection {
+        let issuesKept = min(10, logSection.messages.count)
+        var truncatedMessages = Array(logSection.messages[0..<issuesKept])
+        truncatedMessages.append(getTruncatedLTOIssuesWarning(logSection: logSection, issuesKept: issuesKept))
+        return logSection.with(messages: truncatedMessages)
+    }
+
+    private static func getTruncatedLTOIssuesWarning(logSection: IDEActivityLogSection, issuesKept: Int)
+    -> IDEActivityLogMessage {
+        let title = "Warning: \(logSection.messages.count - issuesKept) LTO issues were truncated"
+        return IDEActivityLogMessage(title: title,
+                                     shortTitle: "",
+                                     timeEmitted: 0,
+                                     rangeEndInSectionText: 0,
+                                     rangeStartInSectionText: 0,
+                                     subMessages: [],
+                                     severity: 0,
+                                     type: "",
+                                     location: DVTDocumentLocation(documentURLString: "", timestamp: 0),
+                                     categoryIdent: "Warning",
+                                     secondaryLocations: [],
+                                     additionalDescription: "")
     }
 }
